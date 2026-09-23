@@ -76,6 +76,8 @@ export class App extends React.Component<AppProps, AppState> {
   remoteStream: MediaStream = new MediaStream();
   videoRef = React.createRef<HTMLVideoElement>();
   chatRef = React.createRef<Chat>();
+  iceCandidateQueue: { [id: string]: RTCIceCandidateInit[] } = {};
+  keepAliveAudioCtx: AudioContext | null = null;
 
   constructor(props: AppProps) {
     super(props);
@@ -107,8 +109,8 @@ export class App extends React.Component<AppProps, AppState> {
         props.isAdmin ||
           window.localStorage.getItem("streamparty-admin-token"),
       ),
-      needsUserUnmute: false,
-      isMuted: false,
+      needsUserUnmute: true,
+      isMuted: true,
     };
   }
 
@@ -226,11 +228,42 @@ export class App extends React.Component<AppProps, AppState> {
   }
 
   componentWillUnmount() {
+    this.stopKeepAlive();
     this.stopPublishingLocalStream();
     if (this.socket) {
       this.socket.disconnect();
     }
   }
+
+  startKeepAlive = () => {
+    if (!this.keepAliveAudioCtx) {
+      try {
+        const AudioCtx =
+          window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          const ctx = new AudioCtx();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          gain.gain.value = 0.00001; // virtually silent keep-alive
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start();
+          this.keepAliveAudioCtx = ctx;
+        }
+      } catch (e) {
+        console.warn("Could not start keep-alive audio context:", e);
+      }
+    }
+  };
+
+  stopKeepAlive = () => {
+    if (this.keepAliveAudioCtx) {
+      try {
+        this.keepAliveAudioCtx.close();
+      } catch (e) {}
+      this.keepAliveAudioCtx = null;
+    }
+  };
 
   syncVideoStream = () => {
     const video = this.videoRef.current;
@@ -246,6 +279,9 @@ export class App extends React.Component<AppProps, AppState> {
       if (video.srcObject !== this.remoteStream) {
         video.srcObject = this.remoteStream || null;
         video.playsInline = true;
+        if (this.state.isMuted) {
+          video.muted = true;
+        }
         this.attemptPlayVideo();
       }
     } else {
@@ -261,17 +297,12 @@ export class App extends React.Component<AppProps, AppState> {
 
     video.play().catch(async (err: any) => {
       // Browser blocked autoplay due to unmuted audio policy
-      if (
-        err.name === "NotAllowedError" ||
-        err.message?.includes("not allowed")
-      ) {
-        video.muted = true;
-        try {
-          await video.play();
-          this.setState({ needsUserUnmute: true, isMuted: true });
-        } catch (e) {
-          console.warn("Muted playback attempt also failed:", e);
-        }
+      video.muted = true;
+      try {
+        await video.play();
+        this.setState({ needsUserUnmute: true, isMuted: true });
+      } catch (e) {
+        console.warn("Muted playback attempt also failed:", e);
       }
     });
   };
@@ -364,6 +395,7 @@ export class App extends React.Component<AppProps, AppState> {
         }
 
         this.localStreamToPublish = stream;
+        this.startKeepAlive();
         this.socket.emit("CMD:joinScreenShare", { file: false });
         this.setupRTCConnections();
         this.syncVideoStream();
@@ -375,6 +407,7 @@ export class App extends React.Component<AppProps, AppState> {
   };
 
   stopPublishingLocalStream = () => {
+    this.stopKeepAlive();
     if (this.localStreamToPublish) {
       this.localStreamToPublish.getTracks().forEach((track) => track.stop());
       this.localStreamToPublish = undefined;
@@ -428,7 +461,15 @@ export class App extends React.Component<AppProps, AppState> {
               try {
                 const params = sender.getParameters();
                 if (params) {
-                  params.degradationPreference = "maintain-framerate";
+                  // Balanced degradation dynamically scales resolution between 1080p, 720p, 480p based on viewer bandwidth
+                  params.degradationPreference = "balanced";
+                  if (!params.encodings || params.encodings.length === 0) {
+                    params.encodings = [{}];
+                  }
+                  // Cap max bitrate at 4 Mbps (crisp 1080p) and min bitrate at 300 kbps (smooth 360p fallback)
+                  params.encodings[0].maxBitrate = 4000000;
+                  params.encodings[0].minBitrate = 300000;
+                  params.encodings[0].maxFramerate = 60;
                   sender.setParameters(params).catch(() => {});
                 }
               } catch (e) {}
@@ -466,11 +507,16 @@ export class App extends React.Component<AppProps, AppState> {
       };
 
       pc.ontrack = (event: RTCTrackEvent) => {
-        if (!this.remoteStream) {
-          this.remoteStream = new MediaStream();
-        }
-        if (!this.remoteStream.getTracks().some((t) => t.id === event.track.id)) {
-          this.remoteStream.addTrack(event.track);
+        // Direct native MediaStream assignment for mobile WebKit (Safari / Chrome)
+        if (event.streams && event.streams[0]) {
+          this.remoteStream = event.streams[0];
+        } else {
+          if (!this.remoteStream) {
+            this.remoteStream = new MediaStream();
+          }
+          if (!this.remoteStream.getTracks().some((t) => t.id === event.track.id)) {
+            this.remoteStream.addTrack(event.track);
+          }
         }
         this.syncVideoStream();
       };
@@ -485,6 +531,39 @@ export class App extends React.Component<AppProps, AppState> {
     }
   };
 
+  enqueueOrAddIceCandidate = async (
+    peerId: string,
+    pc: RTCPeerConnection,
+    candidate: RTCIceCandidateInit,
+  ) => {
+    try {
+      if (pc.remoteDescription && pc.remoteDescription.type) {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } else {
+        if (!this.iceCandidateQueue[peerId]) {
+          this.iceCandidateQueue[peerId] = [];
+        }
+        this.iceCandidateQueue[peerId].push(candidate);
+      }
+    } catch (e) {
+      console.warn("ICE candidate add error:", e);
+    }
+  };
+
+  drainIceCandidateQueue = async (peerId: string, pc: RTCPeerConnection) => {
+    const queue = this.iceCandidateQueue[peerId];
+    if (queue && queue.length > 0) {
+      delete this.iceCandidateQueue[peerId];
+      for (const cand of queue) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(cand));
+        } catch (e) {
+          console.warn("Queued ICE candidate add error:", e);
+        }
+      }
+    }
+  };
+
   handleSignalSS = async (data: any) => {
     const msg = data.msg;
     const from = data.from;
@@ -495,9 +574,10 @@ export class App extends React.Component<AppProps, AppState> {
       const pc = this.publisherConns[from];
       if (!pc) return;
       if (msg.ice !== undefined) {
-        pc.addIceCandidate(new RTCIceCandidate(msg.ice));
+        await this.enqueueOrAddIceCandidate(from, pc, msg.ice);
       } else if (msg.sdp && msg.sdp.type === "answer") {
         await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+        await this.drainIceCandidateQueue(from, pc);
       }
     } else {
       if (!this.consumerConn) {
@@ -506,9 +586,10 @@ export class App extends React.Component<AppProps, AppState> {
       const pc = this.consumerConn;
       if (!pc) return;
       if (msg.ice !== undefined) {
-        pc.addIceCandidate(new RTCIceCandidate(msg.ice));
+        await this.enqueueOrAddIceCandidate(from, pc, msg.ice);
       } else if (msg.sdp && msg.sdp.type === "offer") {
         await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+        await this.drainIceCandidateQueue(from, pc);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         this.sendSignalSS(from, { sdp: pc.localDescription });
@@ -615,6 +696,12 @@ export class App extends React.Component<AppProps, AppState> {
                   autoPlay
                   playsInline
                   controls
+                  muted={this.state.isMuted || isHostSharer}
+                  onClick={
+                    this.state.needsUserUnmute && !isHostSharer
+                      ? this.unmuteAudio
+                      : undefined
+                  }
                 />
               </div>
             ) : this.state.isAdmin ? (
