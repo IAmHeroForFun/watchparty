@@ -48,9 +48,15 @@ export function getOrCreateRoom(rawRoomId: string): Room {
 
 // Ensure target room namespace is initialized before socket handshake completes
 io.engine.use((req: any, _res: Response, next: () => void) => {
-  const roomId = req._query?.roomId;
-  if (roomId && typeof roomId === "string") {
-    getOrCreateRoom(roomId);
+  try {
+    const rawUrl = req.url || "";
+    const parsedUrl = new URL(rawUrl, "http://localhost");
+    const roomId = parsedUrl.searchParams.get("roomId") || req._query?.roomId;
+    if (roomId && typeof roomId === "string") {
+      getOrCreateRoom(roomId);
+    }
+  } catch (e) {
+    // ignore parsing errors
   }
   next();
 });

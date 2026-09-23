@@ -63,35 +63,17 @@ interface AppState {
 }
 
 export class App extends React.Component<AppProps, AppState> {
-  socket: Socket = null as any;
-  roomId = this.props.urlRoomId || this.props.vanity || "";
+  socket: Socket;
+  roomId: string;
   publisherConns: PCDict = {};
   consumerConn: RTCPeerConnection | undefined = undefined;
   localStreamToPublish: MediaStream | undefined = undefined;
   chatRef = React.createRef<Chat>();
 
-  state: AppState = {
-    roomMedia: "",
-    participants: [],
-    rosterUpdateTS: Date.now(),
-    chat: [],
-    nameMap: {},
-    pictureMap: {},
-    tsMap: {},
-    myName: window.localStorage.getItem("streamparty-username") || "",
-    showChatColumn: true,
-    copiedLink: false,
-    isAdmin: Boolean(
-      this.props.isAdmin ||
-        window.localStorage.getItem("streamparty-admin-token"),
-    ),
-  };
-
-  async componentDidMount() {
-    if (!this.state.myName) {
-      const generated = await generateName();
-      this.updateName(generated);
-    }
+  constructor(props: AppProps) {
+    super(props);
+    const rawId = props.urlRoomId || props.vanity || "live-stream";
+    this.roomId = rawId.replace(/^\//, "");
 
     const sessionId = getOrCreateSessionId();
     const adminToken =
@@ -100,10 +82,36 @@ export class App extends React.Component<AppProps, AppState> {
     this.socket = io(`${serverPath}/${this.roomId}`, {
       query: { clientId, roomId: this.roomId, adminToken },
       auth: { sessionId, adminToken },
-      transports: ["websocket"],
+      transports: ["websocket", "polling"],
     });
 
+    this.state = {
+      roomMedia: "",
+      participants: [],
+      rosterUpdateTS: Date.now(),
+      chat: [],
+      nameMap: {},
+      pictureMap: {},
+      tsMap: {},
+      myName: window.localStorage.getItem("streamparty-username") || "",
+      showChatColumn: true,
+      copiedLink: false,
+      isAdmin: Boolean(
+        props.isAdmin ||
+          window.localStorage.getItem("streamparty-admin-token"),
+      ),
+    };
+  }
+
+  async componentDidMount() {
+    if (!this.state.myName) {
+      const generated = await generateName();
+      this.updateName(generated);
+    }
+
     const socket = this.socket;
+    const adminToken =
+      window.localStorage.getItem("streamparty-admin-token") || "";
 
     socket.on("REC:isAdmin", (isAdmin: boolean) => {
       this.setState({ isAdmin });
@@ -675,32 +683,36 @@ export class App extends React.Component<AppProps, AppState> {
             </div>
 
             {/* Voice Chat Module */}
-            <VideoChat
-              socket={this.socket}
-              participants={this.state.participants}
-              nameMap={this.state.nameMap}
-              pictureMap={this.state.pictureMap}
-              tsMap={this.state.tsMap}
-              rosterUpdateTS={this.state.rosterUpdateTS}
-              owner={undefined}
-              getLeaderTime={this.getLeaderTime}
-            />
-
-            {/* Real-time Text Chat */}
-            <div style={{ flexGrow: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-              <Chat
-                chat={this.state.chat}
+            {this.socket && (
+              <VideoChat
+                socket={this.socket}
+                participants={this.state.participants}
                 nameMap={this.state.nameMap}
                 pictureMap={this.state.pictureMap}
-                socket={this.socket}
-                scrollTimestamp={0}
-                getMediaDisplayName={() => "Screen Share"}
-                isChatDisabled={false}
+                tsMap={this.state.tsMap}
+                rosterUpdateTS={this.state.rosterUpdateTS}
                 owner={undefined}
-                ref={this.chatRef}
-                hide={!this.state.showChatColumn}
+                getLeaderTime={this.getLeaderTime}
               />
-            </div>
+            )}
+
+            {/* Real-time Text Chat */}
+            {this.socket && (
+              <div style={{ flexGrow: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+                <Chat
+                  chat={this.state.chat}
+                  nameMap={this.state.nameMap}
+                  pictureMap={this.state.pictureMap}
+                  socket={this.socket}
+                  scrollTimestamp={0}
+                  getMediaDisplayName={() => "Screen Share"}
+                  isChatDisabled={false}
+                  owner={undefined}
+                  ref={this.chatRef}
+                  hide={!this.state.showChatColumn}
+                />
+              </div>
+            )}
           </aside>
         </div>
       </div>

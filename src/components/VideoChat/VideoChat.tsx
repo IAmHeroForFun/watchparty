@@ -31,21 +31,36 @@ export class VideoChat extends React.Component<VideoChatProps> {
   socket = this.props.socket;
 
   componentDidMount() {
-    this.socket.on("signal", this.handleSignal);
+    if (this.socket) {
+      this.socket.on("signal", this.handleSignal);
+    }
   }
 
   componentWillUnmount() {
-    this.socket.off("signal", this.handleSignal);
+    if (this.socket) {
+      this.socket.off("signal", this.handleSignal);
+    }
   }
 
   componentDidUpdate(prevProps: VideoChatProps) {
+    if (this.props.socket !== prevProps.socket) {
+      if (this.socket) {
+        this.socket.off("signal", this.handleSignal);
+      }
+      this.socket = this.props.socket;
+      if (this.socket) {
+        this.socket.on("signal", this.handleSignal);
+      }
+    }
     if (this.props.rosterUpdateTS !== prevProps.rosterUpdateTS) {
       this.updateWebRTC();
     }
   }
 
   emitUserMute = () => {
-    this.socket.emit("CMD:userMute", { isMuted: !this.getAudioWebRTC() });
+    if (this.socket) {
+      this.socket.emit("CMD:userMute", { isMuted: !this.getAudioWebRTC() });
+    }
   };
 
   handleSignal = async (data: any) => {
