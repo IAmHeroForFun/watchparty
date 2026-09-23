@@ -30,6 +30,10 @@ if (
 const io = new Server(server, {
   cors: { origin: "*" },
   transports: ["websocket", "polling"],
+  perMessageDeflate: false,
+  httpCompression: false,
+  pingInterval: 10000,
+  pingTimeout: 5000,
 });
 
 const rooms = new Map<string, Room>();

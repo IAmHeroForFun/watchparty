@@ -21,6 +21,9 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconUsersGroup,
+  IconMaximize,
+  IconVolume,
+  IconVolumeOff,
 } from "@tabler/icons-react";
 import styles from "./App.module.css";
 
@@ -60,6 +63,8 @@ interface AppState {
   showChatColumn: boolean;
   copiedLink: boolean;
   isAdmin: boolean;
+  needsUserUnmute: boolean;
+  isMuted: boolean;
 }
 
 export class App extends React.Component<AppProps, AppState> {
@@ -68,6 +73,8 @@ export class App extends React.Component<AppProps, AppState> {
   publisherConns: PCDict = {};
   consumerConn: RTCPeerConnection | undefined = undefined;
   localStreamToPublish: MediaStream | undefined = undefined;
+  remoteStream: MediaStream = new MediaStream();
+  videoRef = React.createRef<HTMLVideoElement>();
   chatRef = React.createRef<Chat>();
 
   constructor(props: AppProps) {
@@ -100,6 +107,8 @@ export class App extends React.Component<AppProps, AppState> {
         props.isAdmin ||
           window.localStorage.getItem("streamparty-admin-token"),
       ),
+      needsUserUnmute: false,
+      isMuted: false,
     };
   }
 
@@ -212,12 +221,88 @@ export class App extends React.Component<AppProps, AppState> {
     socket.on("signalSS", this.handleSignalSS);
   }
 
+  componentDidUpdate() {
+    this.syncVideoStream();
+  }
+
   componentWillUnmount() {
     this.stopPublishingLocalStream();
     if (this.socket) {
       this.socket.disconnect();
     }
   }
+
+  syncVideoStream = () => {
+    const video = this.videoRef.current;
+    if (!video) return;
+
+    const selfId = clientId;
+    const sharer = this.getSharer();
+    const isPresenter = sharer?.id === selfId && this.localStreamToPublish;
+
+    if (isPresenter) {
+      if (video.srcObject !== this.localStreamToPublish) {
+        video.srcObject = this.localStreamToPublish;
+        video.muted = true; // Presenter muted to prevent audio feedback loop
+        video.play().catch(console.warn);
+      }
+    } else if (this.remoteStream && this.remoteStream.getTracks().length > 0) {
+      if (video.srcObject !== this.remoteStream) {
+        video.srcObject = this.remoteStream;
+        video.playsInline = true;
+        this.attemptPlayVideo();
+      }
+    }
+  };
+
+  attemptPlayVideo = () => {
+    const video = this.videoRef.current;
+    if (!video) return;
+
+    video.play().catch(async (err: any) => {
+      // Browser blocked autoplay due to unmuted audio policy
+      if (
+        err.name === "NotAllowedError" ||
+        err.message?.includes("not allowed")
+      ) {
+        video.muted = true;
+        try {
+          await video.play();
+          this.setState({ needsUserUnmute: true, isMuted: true });
+        } catch (e) {
+          console.warn("Muted playback attempt also failed:", e);
+        }
+      }
+    });
+  };
+
+  unmuteAudio = () => {
+    const video = this.videoRef.current;
+    if (video) {
+      video.muted = false;
+      video.play().catch(console.warn);
+      this.setState({ needsUserUnmute: false, isMuted: false });
+    }
+  };
+
+  toggleFullscreen = () => {
+    const video = this.videoRef.current;
+    if (!video) return;
+
+    if (!document.fullscreenElement) {
+      if (video.requestFullscreen) {
+        video.requestFullscreen().catch(console.warn);
+      } else if ((video as any).webkitRequestFullscreen) {
+        (video as any).webkitRequestFullscreen();
+      } else if ((video as any).webkitEnterFullscreen) {
+        (video as any).webkitEnterFullscreen(); // Mobile Safari
+      }
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(console.warn);
+      }
+    }
+  };
 
   playingScreenShare = () => {
     return isScreenShare(this.state.roomMedia);
@@ -250,29 +335,36 @@ export class App extends React.Component<AppProps, AppState> {
     if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
       try {
         const stream = await navigator.mediaDevices.getDisplayMedia({
-          video: { frameRate: 30, height: 1080 },
-          audio: true,
+          video: {
+            frameRate: { ideal: 60, max: 60 },
+            height: { ideal: 1080 },
+          },
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+          },
         });
 
-        this.localStreamToPublish = stream;
-
-        // Automatically stop if user clicks browser's native "Stop Sharing" button
         const videoTrack = stream.getVideoTracks()[0];
         if (videoTrack) {
+          if ("contentHint" in videoTrack) {
+            (videoTrack as any).contentHint = "motion";
+          }
           videoTrack.onended = () => {
             this.stopPublishingLocalStream();
           };
         }
 
-        const leftVideo = document.getElementById("leftVideo") as HTMLVideoElement;
-        if (leftVideo) {
-          leftVideo.srcObject = stream;
-          leftVideo.muted = true; // Mute locally to avoid audio feedback
-          leftVideo.play().catch(console.warn);
+        const audioTrack = stream.getAudioTracks()[0];
+        if (audioTrack && "contentHint" in audioTrack) {
+          (audioTrack as any).contentHint = "music";
         }
 
+        this.localStreamToPublish = stream;
         this.socket.emit("CMD:joinScreenShare", { file: false });
         this.setupRTCConnections();
+        this.syncVideoStream();
         this.forceUpdate();
       } catch (e) {
         console.warn("Screen share cancelled or failed:", e);
@@ -285,9 +377,8 @@ export class App extends React.Component<AppProps, AppState> {
       this.localStreamToPublish.getTracks().forEach((track) => track.stop());
       this.localStreamToPublish = undefined;
     }
-    const leftVideo = document.getElementById("leftVideo") as HTMLVideoElement;
-    if (leftVideo) {
-      leftVideo.srcObject = null;
+    if (this.videoRef.current) {
+      this.videoRef.current.srcObject = null;
     }
     Object.values(this.publisherConns).forEach((pc) => pc.close());
     this.publisherConns = {};
@@ -330,7 +421,16 @@ export class App extends React.Component<AppProps, AppState> {
 
         this.localStreamToPublish?.getTracks().forEach((track) => {
           if (this.localStreamToPublish) {
-            pc.addTrack(track, this.localStreamToPublish);
+            const sender = pc.addTrack(track, this.localStreamToPublish);
+            if (track.kind === "video") {
+              try {
+                const params = sender.getParameters();
+                if (params) {
+                  params.degradationPreference = "maintain-framerate";
+                  sender.setParameters(params).catch(() => {});
+                }
+              } catch (e) {}
+            }
           }
         });
 
@@ -364,11 +464,13 @@ export class App extends React.Component<AppProps, AppState> {
       };
 
       pc.ontrack = (event: RTCTrackEvent) => {
-        const leftVideo = document.getElementById("leftVideo") as HTMLVideoElement;
-        if (leftVideo) {
-          leftVideo.srcObject = event.streams[0];
-          leftVideo.play().catch(console.warn);
+        if (!this.remoteStream) {
+          this.remoteStream = new MediaStream();
         }
+        if (!this.remoteStream.getTracks().some((t) => t.id === event.track.id)) {
+          this.remoteStream.addTrack(event.track);
+        }
+        this.syncVideoStream();
       };
 
       pc.oniceconnectionstatechange = () => {
@@ -438,27 +540,9 @@ export class App extends React.Component<AppProps, AppState> {
       >
         <TopBar />
 
-        <div
-          style={{
-            display: "flex",
-            flexGrow: 1,
-            position: "relative",
-            overflow: "hidden",
-          }}
-        >
+        <div className={styles.mainContainer}>
           {/* Main Stage (Screen Share Viewport) */}
-          <div
-            style={{
-              flexGrow: 1,
-              display: "flex",
-              flexDirection: "column",
-              position: "relative",
-              backgroundColor: "#050507",
-              justifyContent: "center",
-              alignItems: "center",
-              padding: "12px",
-            }}
-          >
+          <div className={styles.streamSection}>
             {this.playingScreenShare() ? (
               <div
                 style={{
@@ -469,76 +553,60 @@ export class App extends React.Component<AppProps, AppState> {
                   alignItems: "center",
                   justifyContent: "center",
                   backgroundColor: "#000000",
-                  borderRadius: "8px",
-                  overflow: "hidden",
-                  border: "1px solid rgba(255, 46, 76, 0.3)",
-                  boxShadow: "0 0 24px rgba(255, 46, 76, 0.15)",
                 }}
               >
                 {/* Status Badge */}
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "12px",
-                    left: "12px",
-                    zIndex: 2,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    backgroundColor: "rgba(13, 14, 18, 0.8)",
-                    backdropFilter: "blur(8px)",
-                    padding: "4px 10px",
-                    borderRadius: "4px",
-                    border: "1px solid rgba(255, 46, 76, 0.3)",
-                  }}
-                >
-                  <span
-                    style={{
-                      width: "8px",
-                      height: "8px",
-                      borderRadius: "50%",
-                      backgroundColor: "#ff2e4c",
-                      boxShadow: "0 0 8px #ff2e4c",
-                    }}
-                  />
+                <div className={styles.liveBadge}>
+                  <span className={styles.liveDot} />
                   <Text size="xs" fw={700} c="red">
-                    LIVE SCREEN
+                    LIVE STREAM
                   </Text>
                   <Text size="xs" c="dimmed">
                     ({sharerName})
                   </Text>
                 </div>
 
-                {/* Stop Share Button for Presenter */}
-                {isHostSharer && (
-                  <Button
-                    color="red"
-                    size="xs"
-                    onClick={this.stopPublishingLocalStream}
-                    leftSection={<IconScreenShareOff size={16} />}
-                    style={{
-                      position: "absolute",
-                      top: "12px",
-                      right: "12px",
-                      zIndex: 2,
-                    }}
+                {/* Top Right Overlay Controls */}
+                <div className={styles.playerOverlayControls}>
+                  {isHostSharer && (
+                    <Button
+                      color="red"
+                      size="xs"
+                      onClick={this.stopPublishingLocalStream}
+                      leftSection={<IconScreenShareOff size={16} />}
+                    >
+                      Stop Sharing
+                    </Button>
+                  )}
+                  <ActionIcon
+                    size="sm"
+                    color="gray"
+                    variant="filled"
+                    title="Toggle Fullscreen"
+                    onClick={this.toggleFullscreen}
                   >
-                    Stop Sharing
-                  </Button>
+                    <IconMaximize size={16} />
+                  </ActionIcon>
+                </div>
+
+                {/* Floating Unmute Banner if Browser Blocked Autoplay */}
+                {this.state.needsUserUnmute && !isHostSharer && (
+                  <div
+                    className={styles.unmuteBanner}
+                    onClick={this.unmuteAudio}
+                  >
+                    <IconVolumeOff size={18} />
+                    <span>Click to Unmute Live Audio</span>
+                  </div>
                 )}
 
                 {/* Hardware Accelerated Video Stream */}
                 <video
-                  id="leftVideo"
+                  ref={this.videoRef}
+                  className={styles.videoElement}
                   autoPlay
                   playsInline
                   controls
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "contain",
-                    maxHeight: "calc(100vh - 90px)",
-                  }}
                 />
               </div>
             ) : this.state.isAdmin ? (
@@ -638,17 +706,9 @@ export class App extends React.Component<AppProps, AppState> {
 
           {/* Right Sidebar (Voice, Users & Text Chat) */}
           <aside
+            className={styles.sidebarSection}
             style={{
-              width: this.state.showChatColumn ? "360px" : "0px",
-              minWidth: this.state.showChatColumn ? "360px" : "0px",
-              display: "flex",
-              flexDirection: "column",
-              backgroundColor: "#0d0e12",
-              borderLeft: "1px solid rgba(255, 46, 76, 0.15)",
-              transition: "width 0.3s ease",
-              overflow: "hidden",
-              padding: this.state.showChatColumn ? "10px" : "0px",
-              gap: "10px",
+              display: this.state.showChatColumn ? "flex" : "none",
             }}
           >
             {/* User Profile & Invite Bar */}

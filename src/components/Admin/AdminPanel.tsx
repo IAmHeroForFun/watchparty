@@ -196,7 +196,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ initialRoomId }) => {
       style={{
         display: "flex",
         flexDirection: "column",
-        height: "100vh",
+        minHeight: "100vh",
         backgroundColor: "#08080a",
       }}
     >
