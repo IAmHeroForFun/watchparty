@@ -7,7 +7,7 @@ try {
 }
 
 const defaults = {
-  PORT: 8080,
+  PORT: 38282,
   HOST: "0.0.0.0",
   NODE_ENV: "",
   BUILD_DIRECTORY: "build",

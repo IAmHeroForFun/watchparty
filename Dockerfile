@@ -21,8 +21,9 @@ FROM node:22-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
-ENV PORT=8080
+ENV PORT=38282
 ENV HOST=0.0.0.0
+ENV NODE_OPTIONS="--experimental-strip-types"
 
 # Install production dependencies only
 COPY package*.json ./
@@ -36,6 +37,6 @@ COPY --from=builder /app/words ./words
 # Non-root user for security
 USER node
 
-EXPOSE 8080
+EXPOSE 38282
 
 CMD ["node", "server/server.ts"]

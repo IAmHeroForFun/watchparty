@@ -47,7 +47,7 @@ cp .env.example .env
 ```
 Default configuration:
 ```env
-PORT=8080
+PORT=38282
 HOST=0.0.0.0
 NODE_ENV=production
 ```
@@ -56,13 +56,13 @@ NODE_ENV=production
 ```bash
 docker compose up -d --build
 ```
-Access the application at `http://localhost:8080`.
+Access the application at `http://localhost:38282`.
 
 ---
 
 ## Production Deployment (AWS Lightsail / VPS)
 
-The app binds internally to `127.0.0.1:8080` so that your host's Nginx handles public SSL termination and existing services (such as blogs on port 80/443 or DNS resolvers on port 53) remain completely undisturbed.
+The app binds internally to `127.0.0.1:38282` so that your host's Nginx handles public SSL termination and existing services (such as blogs on port 80/443 or DNS resolvers on port 53) remain completely undisturbed.
 
 ### 1. Configure DNS
 Create an `A` record pointing your chosen subdomain (e.g., `stream.yourdomain.com`) to your server's public IP address.

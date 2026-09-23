@@ -9,12 +9,13 @@ services:
     container_name: screenshare-app
     restart: unless-stopped
     ports:
-      # Bound to internal loopback so Nginx handles public SSL termination
-      - "127.0.0.1:8080:8080"
+      # Bound to internal loopback on custom port 38282 so Nginx handles public SSL termination
+      - "127.0.0.1:38282:38282"
     environment:
-      - PORT=8080
+      - PORT=38282
       - HOST=0.0.0.0
       - NODE_ENV=production
+      - NODE_OPTIONS=--experimental-strip-types
     deploy:
       resources:
         limits:
