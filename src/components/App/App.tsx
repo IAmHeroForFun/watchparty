@@ -283,6 +283,8 @@ export class App extends React.Component<AppProps, AppState> {
           video.muted = true;
         }
         this.attemptPlayVideo();
+      } else if (video.paused) {
+        this.attemptPlayVideo();
       }
     } else {
       if (video.srcObject) {
@@ -482,7 +484,7 @@ export class App extends React.Component<AppProps, AppState> {
           }
         };
 
-        pc.onnegotiationneeded = async () => {
+        const createAndSendOffer = async () => {
           try {
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
@@ -491,6 +493,10 @@ export class App extends React.Component<AppProps, AppState> {
             console.warn("Offer creation error:", e);
           }
         };
+
+        pc.onnegotiationneeded = createAndSendOffer;
+        // Explicitly trigger offer immediately so we do not miss asynchronous dispatch
+        createAndSendOffer();
       });
     }
 
