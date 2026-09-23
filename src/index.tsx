@@ -10,6 +10,7 @@ import { Home } from "./components/Home/Home";
 import { TopBar } from "./components/TopBar/TopBar";
 import { Footer } from "./components/Footer/Footer";
 import { Create } from "./components/Create/Create";
+import { AdminPanel } from "./components/Admin/AdminPanel";
 import { DEFAULT_STATE, MetadataContext } from "./MetadataContext";
 import { createTheme, MantineProvider } from "@mantine/core";
 
@@ -88,6 +89,22 @@ class StreamParty extends React.Component {
               exact
               render={(props) => {
                 return <App urlRoomId={props.match.params.roomId} />;
+              }}
+            />
+            <Route
+              path="/admin"
+              exact
+              render={() => {
+                return <AdminPanel />;
+              }}
+            />
+            <Route
+              path="/admin/:roomId"
+              exact
+              render={(props) => {
+                return (
+                  <AdminPanel initialRoomId={props.match.params.roomId} />
+                );
               }}
             />
             <Route

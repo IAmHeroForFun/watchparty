@@ -1,8 +1,10 @@
 import { Server, Socket } from "socket.io";
+import config from "./config.ts";
 
 declare module "socket.io" {
   interface Socket {
     clientId: string;
+    isAdmin?: boolean;
   }
 }
 
@@ -24,6 +26,18 @@ export class Room {
   public isChatDisabled = false;
   public lastUpdateTime: Date = new Date();
 
+  private verifyAdminToken = (token: unknown): boolean => {
+    if (!token || typeof token !== "string") {
+      return false;
+    }
+    try {
+      const decoded = Buffer.from(token, "base64").toString("utf-8");
+      return decoded.startsWith(`admin:${config.ADMIN_PASSWORD}:`);
+    } catch {
+      return false;
+    }
+  };
+
   constructor(io: Server, roomId: string) {
     this.roomId = roomId;
     this.io = io;
@@ -33,6 +47,13 @@ export class Room {
       if (typeof clientId !== "string" || !clientId) {
         next(new Error("Invalid clientId"));
         return;
+      }
+
+      const adminToken =
+        socket.handshake.auth?.adminToken ||
+        socket.handshake.query?.adminToken;
+      if (this.verifyAdminToken(adminToken)) {
+        socket.isAdmin = true;
       }
 
       // Disconnect any existing socket with this clientId
@@ -58,8 +79,19 @@ export class Room {
       socket.emit("REC:pictureMap", this.pictureMap);
       socket.emit("REC:lock", "");
       socket.emit("chatinit", this.chat);
+      socket.emit("REC:isAdmin", Boolean(socket.isAdmin));
       socket.emit("REC:getRoomState", { isChatDisabled: false });
       io.of(roomId).emit("roster", this.getRosterForApp());
+
+      socket.on("CMD:authAdmin", (token: unknown) => {
+        if (this.verifyAdminToken(token)) {
+          socket.isAdmin = true;
+          socket.emit("REC:isAdmin", true);
+          this.io.of(this.roomId).emit("roster", this.getRosterForApp());
+        } else {
+          socket.emit("REC:isAdmin", false);
+        }
+      });
 
       // Profile & Identity
       socket.on("CMD:name", (data: unknown) =>
@@ -132,10 +164,17 @@ export class Room {
 
   protected getRosterForApp = (): User[] => {
     const sharerId = this.getSharerId();
-    return this.roster.map((p) => ({
-      ...p,
-      isScreenShare: p.id === sharerId,
-    }));
+    return this.roster.map((p) => {
+      const socketId = this.socketIdMap[p.id];
+      const socket = socketId
+        ? this.io.of(this.roomId).sockets.get(socketId)
+        : null;
+      return {
+        ...p,
+        isScreenShare: p.id === sharerId,
+        isAdmin: Boolean(socket?.isAdmin),
+      };
+    });
   };
 
   private getHostState = (): HostState => {
@@ -314,6 +353,13 @@ export class Room {
   };
 
   private joinScreenSharing = (socket: Socket) => {
+    if (!socket.isAdmin) {
+      socket.emit(
+        "errorMessage",
+        "Only the authorized room admin can start streaming in this room.",
+      );
+      return;
+    }
     const currentSharer = this.getRosterForApp().find(
       (user) => user.isScreenShare,
     );

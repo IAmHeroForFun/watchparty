@@ -16,6 +16,7 @@ services:
       - HOST=0.0.0.0
       - NODE_ENV=production
       - NODE_OPTIONS=--experimental-strip-types
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
     deploy:
       resources:
         limits:

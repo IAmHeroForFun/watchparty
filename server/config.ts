@@ -13,6 +13,7 @@ const defaults = {
   BUILD_DIRECTORY: "build",
   SSL_KEY_FILE: "",
   SSL_CRT_FILE: "",
+  ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || "admin123",
 };
 
 export default {

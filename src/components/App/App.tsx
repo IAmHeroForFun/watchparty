@@ -45,6 +45,7 @@ const clientId = getOrCreateClientId();
 interface AppProps {
   vanity?: string;
   urlRoomId?: string;
+  isAdmin?: boolean;
 }
 
 interface AppState {
@@ -58,6 +59,7 @@ interface AppState {
   myName: string;
   showChatColumn: boolean;
   copiedLink: boolean;
+  isAdmin: boolean;
 }
 
 export class App extends React.Component<AppProps, AppState> {
@@ -79,6 +81,10 @@ export class App extends React.Component<AppProps, AppState> {
     myName: window.localStorage.getItem("streamparty-username") || "",
     showChatColumn: true,
     copiedLink: false,
+    isAdmin: Boolean(
+      this.props.isAdmin ||
+        window.localStorage.getItem("streamparty-admin-token"),
+    ),
   };
 
   async componentDidMount() {
@@ -88,17 +94,27 @@ export class App extends React.Component<AppProps, AppState> {
     }
 
     const sessionId = getOrCreateSessionId();
+    const adminToken =
+      window.localStorage.getItem("streamparty-admin-token") || "";
+
     this.socket = io(`${serverPath}/${this.roomId}`, {
-      query: { clientId, roomId: this.roomId },
-      auth: { sessionId },
+      query: { clientId, roomId: this.roomId, adminToken },
+      auth: { sessionId, adminToken },
       transports: ["websocket"],
     });
 
     const socket = this.socket;
 
+    socket.on("REC:isAdmin", (isAdmin: boolean) => {
+      this.setState({ isAdmin });
+    });
+
     socket.on("connect", () => {
       if (this.state.myName) {
         socket.emit("CMD:name", this.state.myName);
+      }
+      if (adminToken) {
+        socket.emit("CMD:authAdmin", adminToken);
       }
     });
 
@@ -219,6 +235,10 @@ export class App extends React.Component<AppProps, AppState> {
   };
 
   startScreenShare = async () => {
+    if (!this.state.isAdmin) {
+      alert("Only the room administrator can broadcast a stream.");
+      return;
+    }
     if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
       try {
         const stream = await navigator.mediaDevices.getDisplayMedia({
@@ -513,8 +533,8 @@ export class App extends React.Component<AppProps, AppState> {
                   }}
                 />
               </div>
-            ) : (
-              /* Idle / Waiting Screen */
+            ) : this.state.isAdmin ? (
+              /* Admin Broadcaster Waiting Screen */
               <div
                 style={{
                   display: "flex",
@@ -546,10 +566,10 @@ export class App extends React.Component<AppProps, AppState> {
                   <IconScreenShare size={36} color="#ff2e4c" />
                 </div>
                 <Text size="xl" fw={700} style={{ color: "#f8fafc", marginBottom: "8px" }}>
-                  Ready to Stream
+                  Broadcaster Studio
                 </Text>
                 <Text size="sm" c="dimmed" style={{ marginBottom: "24px", lineHeight: 1.5 }}>
-                  Share your monitor, application window, or browser tab with full computer audio to all participants in this room.
+                  You are the Room Admin. Click below to share your screen with system audio to all connected viewers.
                 </Text>
                 <Button
                   color="red"
@@ -560,8 +580,50 @@ export class App extends React.Component<AppProps, AppState> {
                     boxShadow: "0 0 16px rgba(255, 46, 76, 0.4)",
                   }}
                 >
-                  Start Screen Share
+                  Start Screen Broadcast
                 </Button>
+              </div>
+            ) : (
+              /* Viewer Waiting Screen */
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "48px 36px",
+                  borderRadius: "12px",
+                  backgroundColor: "#111216",
+                  border: "1px solid rgba(255, 255, 255, 0.08)",
+                  boxShadow: "0 8px 32px rgba(0, 0, 0, 0.6)",
+                  textAlign: "center",
+                  maxWidth: "480px",
+                }}
+              >
+                <div
+                  style={{
+                    width: "72px",
+                    height: "72px",
+                    borderRadius: "50%",
+                    backgroundColor: "rgba(255, 255, 255, 0.04)",
+                    border: "1px solid rgba(255, 255, 255, 0.12)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    marginBottom: "18px",
+                  }}
+                >
+                  <IconScreenShare size={36} color="#94a3b8" />
+                </div>
+                <Badge color="gray" variant="outline" size="md" mb="xs">
+                  STREAM OFFLINE
+                </Badge>
+                <Text size="xl" fw={700} style={{ color: "#ffffff", marginBottom: "8px" }}>
+                  Waiting for Host to Stream
+                </Text>
+                <Text size="sm" c="dimmed" style={{ lineHeight: 1.6 }}>
+                  The host is currently not broadcasting. Sit tight — the stream will appear here automatically as soon as the host starts!
+                </Text>
               </div>
             )}
           </div>

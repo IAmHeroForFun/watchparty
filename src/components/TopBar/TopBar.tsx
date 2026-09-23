@@ -1,7 +1,7 @@
 import React, { useCallback } from "react";
 import { serverPath } from "../../utils/utils";
 import { Button, Text } from "@mantine/core";
-import { IconCirclePlusFilled } from "@tabler/icons-react";
+import { IconCirclePlusFilled, IconLock } from "@tabler/icons-react";
 
 export async function createRoom(openNewTab?: boolean) {
   const response = await fetch(serverPath + "/createRoom", {
@@ -119,6 +119,16 @@ export const TopBar = (props: {
           gap: "8px",
         }}
       >
+        <Button
+          component="a"
+          href="/admin"
+          size="xs"
+          variant="subtle"
+          color="gray"
+          leftSection={<IconLock size={14} />}
+        >
+          Studio
+        </Button>
         {!props.hideNewRoom && <NewRoomButton openNewTab />}
       </div>
     </header>

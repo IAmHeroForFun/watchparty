@@ -116,6 +116,56 @@ app.get("/resolveRoom/:vanity", (_req, res) => {
   res.json(null);
 });
 
+// Helper to validate admin bearer tokens
+export function isValidAdminToken(token: string): boolean {
+  if (!token) return false;
+  try {
+    const decoded = Buffer.from(token, "base64").toString("utf-8");
+    return decoded.startsWith(`admin:${config.ADMIN_PASSWORD}:`);
+  } catch {
+    return false;
+  }
+}
+
+// Admin Authentication API
+app.post("/api/admin/login", (req, res) => {
+  const { password } = req.body || {};
+  if (password && password === config.ADMIN_PASSWORD) {
+    const token = Buffer.from(`admin:${config.ADMIN_PASSWORD}:${Date.now()}`).toString("base64");
+    res.json({ success: true, token });
+  } else {
+    res.status(401).json({ success: false, error: "Invalid admin password" });
+  }
+});
+
+// Admin Verify Token API
+app.get("/api/admin/verify", (req, res) => {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.replace("Bearer ", "");
+  if (isValidAdminToken(token)) {
+    res.json({ valid: true });
+  } else {
+    res.status(401).json({ valid: false });
+  }
+});
+
+// Admin Room Management API
+app.get("/api/admin/rooms", (req, res) => {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.replace("Bearer ", "");
+  if (!isValidAdminToken(token)) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const activeRooms = Array.from(rooms.entries()).map(([name, room]) => ({
+    name: name.replace(/^\//, ""),
+    viewers: room.roster.length,
+    isStreaming: Boolean(room.video?.startsWith("screenshare://")),
+    lastUpdated: room.lastUpdateTime,
+  }));
+  res.json({ rooms: activeRooms });
+});
+
 // Static client bundle serving
 const buildPath = path.resolve(process.cwd(), config.BUILD_DIRECTORY);
 app.use(express.static(buildPath));
