@@ -29,7 +29,11 @@ services:
         max-file: "3"
     networks:
       - default
+      - omvi_blog_default
 
 networks:
   default:
     name: streamparty-net
+  omvi_blog_default:
+    external: true
+
