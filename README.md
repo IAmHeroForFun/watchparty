@@ -62,6 +62,9 @@ Access the application at `http://localhost:38282`.
 
 ## Production Deployment (AWS Lightsail / VPS)
 
+> [!TIP]
+> For an exhaustive, step-by-step walkthrough covering coexistence with an existing blog (ports 80/443) and local DNS resolver (port 53), see the dedicated [LIGHTSAIL_HOSTING_GUIDE.md](LIGHTSAIL_HOSTING_GUIDE.md).
+
 The app binds internally to `127.0.0.1:38282` so that your host's Nginx handles public SSL termination and existing services (such as blogs on port 80/443 or DNS resolvers on port 53) remain completely undisturbed.
 
 ### 1. Configure DNS
