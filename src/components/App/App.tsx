@@ -466,9 +466,8 @@ export class App extends React.Component<AppProps, AppState> {
                   if (!params.encodings || params.encodings.length === 0) {
                     params.encodings = [{}];
                   }
-                  // Cap max bitrate at 4 Mbps (crisp 1080p) and min bitrate at 300 kbps (smooth 360p fallback)
+                  // Cap max bitrate at 4 Mbps (crisp 1080p)
                   params.encodings[0].maxBitrate = 4000000;
-                  params.encodings[0].minBitrate = 300000;
                   params.encodings[0].maxFramerate = 60;
                   sender.setParameters(params).catch(() => {});
                 }
