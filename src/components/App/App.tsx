@@ -236,21 +236,21 @@ export class App extends React.Component<AppProps, AppState> {
     const video = this.videoRef.current;
     if (!video) return;
 
-    const selfId = clientId;
-    const sharer = this.getSharer();
-    const isPresenter = sharer?.id === selfId && this.localStreamToPublish;
-
-    if (isPresenter) {
+    if (this.localStreamToPublish) {
       if (video.srcObject !== this.localStreamToPublish) {
-        video.srcObject = this.localStreamToPublish;
+        video.srcObject = this.localStreamToPublish || null;
         video.muted = true; // Presenter muted to prevent audio feedback loop
         video.play().catch(console.warn);
       }
     } else if (this.remoteStream && this.remoteStream.getTracks().length > 0) {
       if (video.srcObject !== this.remoteStream) {
-        video.srcObject = this.remoteStream;
+        video.srcObject = this.remoteStream || null;
         video.playsInline = true;
         this.attemptPlayVideo();
+      }
+    } else {
+      if (video.srcObject) {
+        video.srcObject = null;
       }
     }
   };
@@ -305,7 +305,9 @@ export class App extends React.Component<AppProps, AppState> {
   };
 
   playingScreenShare = () => {
-    return isScreenShare(this.state.roomMedia);
+    return Boolean(
+      this.localStreamToPublish || isScreenShare(this.state.roomMedia)
+    );
   };
 
   getSharer = () => {
@@ -524,8 +526,14 @@ export class App extends React.Component<AppProps, AppState> {
 
   render() {
     const sharer = this.getSharer();
-    const isHostSharer = sharer?.id === clientId;
-    const sharerName = sharer ? this.state.nameMap[sharer.id] || sharer.id : "";
+    const isHostSharer = Boolean(
+      this.localStreamToPublish || (sharer && sharer.id === clientId),
+    );
+    const sharerName = isHostSharer
+      ? this.state.myName || "You (Host)"
+      : sharer
+        ? this.state.nameMap[sharer.id] || sharer.id
+        : "Broadcaster";
 
     return (
       <div
